@@ -1287,6 +1287,8 @@ protected:
 	void tx_data(const Transfer_t *transfer);
 	void init();
 	void write_packed(uint32_t data);
+    void add_sysex_packed(uint32_t data);
+    void write_sysex_message();
 	void send_sysex_buffer_has_term(const uint8_t *data, uint32_t length, uint8_t cable);
 	void send_sysex_add_term_bytes(const uint8_t *data, uint32_t length, uint8_t cable);
 	void sysex_byte(uint8_t b);
@@ -1322,8 +1324,11 @@ private:
 	uint8_t msg_data1;
 	uint8_t msg_data2;
 	uint8_t msg_sysex[SYSEX_MAX_LEN];
-	uint16_t msg_sysex_len;
-	void (*handleNoteOff)(uint8_t ch, uint8_t note, uint8_t vel);
+    uint16_t msg_sysex_len;
+    uint32_t msg_sysex_packed[SYSEX_MAX_LEN / 3];
+    uint16_t msg_sysex_len_packed;
+    bool support_sysex_multi_message;
+    void (*handleNoteOff)(uint8_t ch, uint8_t note, uint8_t vel);
 	void (*handleNoteOn)(uint8_t ch, uint8_t note, uint8_t vel);
 	void (*handleVelocityChange)(uint8_t ch, uint8_t note, uint8_t vel);
 	void (*handleControlChange)(uint8_t ch, uint8_t control, uint8_t value);

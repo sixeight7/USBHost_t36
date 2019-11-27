@@ -57,6 +57,7 @@ void MIDIDeviceBase::init()
 	rxpipe = NULL;
 	txpipe = NULL;
 	driver_ready_for_device(this);
+    support_sysex_multi_message = false;
 }
 
 // Audio Class-Specific Descriptor Types (audio 1.0, page 99)
@@ -126,22 +127,27 @@ bool MIDIDeviceBase::claim(Device_t *dev, int type, const uint8_t *descriptors, 
 				// Interface Header, midi 1.0, page 21
 				println("    MIDI Header (ignored)");
 				ismidi = true;
+                support_sysex_multi_message = false;
 			} else if (subtype == 2) {
 				// MIDI IN Jack, midi 1.0, page 22
 				println("    MIDI IN Jack (ignored)");
 				ismidi = true;
+                support_sysex_multi_message = false;
 			} else if (subtype == 3) {
 				// MIDI OUT Jack, midi 1.0, page 22
 				println("    MIDI OUT Jack (ignored)");
 				ismidi = true;
+                support_sysex_multi_message = false;
 			} else if (subtype == 4) {
 				// Element Descriptor, midi 1.0, page 23-24
 				println("    MIDI Element (ignored)");
 				ismidi = true;
+                support_sysex_multi_message = false;
 			} else if (subtype == 0xF1 && p[3] == 2) {
 				// see Linux sound/usb/quirks.c create_roland_midi_quirk()
 				println("    Roland vendor-specific (ignored)");
 				ismidi = true;
+                support_sysex_multi_message = true;
 			} else {
 				println("    Unknown MIDI CS_INTERFACE descriptor!");
 				return false; // unknown
@@ -327,49 +333,118 @@ void MIDIDeviceBase::write_packed(uint32_t data)
 	}
 }
 
+void MIDIDeviceBase::add_sysex_packed(uint32_t data){
+    if (!support_sysex_multi_message) { // Just send the message...
+        write_packed(data);
+        return;
+    }
+    msg_sysex_packed[msg_sysex_len_packed++] = data;
+    if (msg_sysex_len_packed >= (SYSEX_MAX_LEN / 3)) write_sysex_message();
+}
+
+void MIDIDeviceBase::write_sysex_message() {
+    if (!txpipe) return;
+    if (!support_sysex_multi_message) return;
+    uint32_t tx_max = tx_size / 4;
+    while (1) {
+        uint32_t tx1 = tx1_count;
+        uint32_t tx2 = tx2_count;
+        if (tx1 + msg_sysex_len_packed <= tx_max && (tx2 == 0 || tx2 >= tx_max)) {
+            // use tx_buffer1
+            for (uint16_t i = 0; i < msg_sysex_len_packed; i++) {
+                tx_buffer1[tx1++] = msg_sysex_packed[i];
+                if (tx1 >= tx_max) {
+                    queue_Data_Transfer(txpipe, tx_buffer1, tx_max*4, this);
+                }
+            }
+            tx1_count = tx1;
+            if (tx1 >= tx_max) {
+                queue_Data_Transfer(txpipe, tx_buffer1, tx_max*4, this);
+            } else {
+                // TODO: start a timer, rather than sending the buffer
+                // before it's full, to make best use of bandwidth
+                tx1_count = tx_max;
+                queue_Data_Transfer(txpipe, tx_buffer1, tx_max*4, this);
+            }
+            msg_sysex_len_packed = 0;
+            return;
+        }
+        if (tx2 + msg_sysex_len_packed <= tx_max) {
+            // use tx_buffer2
+            for (uint16_t i = 0; i < msg_sysex_len_packed; i++) {
+                tx_buffer2[tx2++] = msg_sysex_packed[i];
+                if (tx2 >= tx_max) {
+                    queue_Data_Transfer(txpipe, tx_buffer2, tx_max*4, this);
+                }
+            }
+            tx2_count = tx2;
+            if (tx2 >= tx_max) {
+                queue_Data_Transfer(txpipe, tx_buffer2, tx_max*4, this);
+            } else {
+                // TODO: start a timer, rather than sending the buffer
+                // before it's full, to make best use of bandwidth
+                tx2_count = tx_max;
+                queue_Data_Transfer(txpipe, tx_buffer2, tx_max*4, this);
+            }
+            msg_sysex_len_packed = 0;
+            return;
+        }
+    }
+}
+
 void MIDIDeviceBase::send_sysex_buffer_has_term(const uint8_t *data, uint32_t length, uint8_t cable)
 {
 	cable = (cable & 0x0F) << 4;
+    msg_sysex_len_packed = 0;
 	while (length > 3) {
-		write_packed(0x04 | cable | (data[0] << 8) | (data[1] << 16) | (data[2] << 24));
+		add_sysex_packed(0x04 | cable | (data[0] << 8) | (data[1] << 16) | (data[2] << 24));
 		data += 3;
 		length -= 3;
 	}
 	if (length == 3) {
-		write_packed(0x07 | cable | (data[0] << 8) | (data[1] << 16) | (data[2] << 24));
+		add_sysex_packed(0x07 | cable | (data[0] << 8) | (data[1] << 16) | (data[2] << 24));
+        write_sysex_message();
 	} else if (length == 2) {
-		write_packed(0x06 | cable | (data[0] << 8) | (data[1] << 16));
+		add_sysex_packed(0x06 | cable | (data[0] << 8) | (data[1] << 16));
+        write_sysex_message();
 	} else if (length == 1) {
-		write_packed(0x05 | cable | (data[0] << 8));
+		add_sysex_packed(0x05 | cable | (data[0] << 8));
+        write_sysex_message();
 	}
 }
 
 void MIDIDeviceBase::send_sysex_add_term_bytes(const uint8_t *data, uint32_t length, uint8_t cable)
 {
 	cable = (cable & 0x0F) << 4;
+    msg_sysex_len_packed = 0;
 
 	if (length == 0) {
-		write_packed(0x06 | cable | (0xF0 << 8) | (0xF7 << 16));
+		add_sysex_packed(0x06 | cable | (0xF0 << 8) | (0xF7 << 16));
+        write_sysex_message();
 		return;
 	} else if (length == 1) {
-		write_packed(0x07 | cable | (0xF0 << 8) | (data[0] << 16) | (0xF7 << 24));
+		add_sysex_packed(0x07 | cable | (0xF0 << 8) | (data[0] << 16) | (0xF7 << 24));
+        write_sysex_message();
 		return;
 	} else {
-		write_packed(0x04 | cable | (0xF0 << 8) | (data[0] << 16) | (data[1] << 24));
+		add_sysex_packed(0x04 | cable | (0xF0 << 8) | (data[0] << 16) | (data[1] << 24));
 		data += 2;
 		length -= 2;
 	}
 	while (length >= 3) {
-		write_packed(0x04 | cable | (data[0] << 8) | (data[1] << 16) | (data[2] << 24));
+		add_sysex_packed(0x04 | cable | (data[0] << 8) | (data[1] << 16) | (data[2] << 24));
 		data += 3;
 		length -= 3;
 	}
 	if (length == 2) {
-		write_packed(0x07 | cable | (data[0] << 8) | (data[1] << 16) | (0xF7 << 24));
+		add_sysex_packed(0x07 | cable | (data[0] << 8) | (data[1] << 16) | (0xF7 << 24));
+        write_sysex_message();
 	} else if (length == 1) {
-		write_packed(0x06 | cable | (data[0] << 8) | (0xF7 << 16));
+		add_sysex_packed(0x06 | cable | (data[0] << 8) | (0xF7 << 16));
+        write_sysex_message();
 	} else {
-		write_packed(0x05 | cable | (0xF7 << 8));
+		add_sysex_packed(0x05 | cable | (0xF7 << 8));
+        write_sysex_message();
 	}
 }
 
