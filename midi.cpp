@@ -339,6 +339,7 @@ void MIDIDeviceBase::add_sysex_packed(uint32_t data){
         return;
     }
     msg_sysex_packed[msg_sysex_len_packed++] = data;
+    if (msg_sysex_len_packed >= tx_size) write_sysex_message();
     if (msg_sysex_len_packed >= (SYSEX_MAX_LEN / 3)) write_sysex_message();
 }
 
