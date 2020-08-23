@@ -57,7 +57,6 @@ void MIDIDeviceBase::init()
 	rxpipe = NULL;
 	txpipe = NULL;
 	driver_ready_for_device(this);
-    support_sysex_multi_message = false;
 }
 
 // Audio Class-Specific Descriptor Types (audio 1.0, page 99)
@@ -127,27 +126,22 @@ bool MIDIDeviceBase::claim(Device_t *dev, int type, const uint8_t *descriptors, 
 				// Interface Header, midi 1.0, page 21
 				println("    MIDI Header (ignored)");
 				ismidi = true;
-                support_sysex_multi_message = false;
 			} else if (subtype == 2) {
 				// MIDI IN Jack, midi 1.0, page 22
 				println("    MIDI IN Jack (ignored)");
 				ismidi = true;
-                support_sysex_multi_message = false;
 			} else if (subtype == 3) {
 				// MIDI OUT Jack, midi 1.0, page 22
 				println("    MIDI OUT Jack (ignored)");
 				ismidi = true;
-                support_sysex_multi_message = false;
 			} else if (subtype == 4) {
 				// Element Descriptor, midi 1.0, page 23-24
 				println("    MIDI Element (ignored)");
 				ismidi = true;
-                support_sysex_multi_message = false;
 			} else if (subtype == 0xF1 && p[3] == 2) {
 				// see Linux sound/usb/quirks.c create_roland_midi_quirk()
 				println("    Roland vendor-specific (ignored)");
 				ismidi = true;
-                support_sysex_multi_message = true;
 			} else {
 				println("    Unknown MIDI CS_INTERFACE descriptor!");
 				return false; // unknown
@@ -164,6 +158,7 @@ bool MIDIDeviceBase::claim(Device_t *dev, int type, const uint8_t *descriptors, 
 					rx_ep = p[2] & 0x0F;
 					rx_ep_type = p[3];
 					rx_size = p[4] | (p[5] << 8);
+                    //rx_size = 16; // Test MG-300!!!!
 					println("      rx_size = ", rx_size);
 				}
 				break;
@@ -334,18 +329,13 @@ void MIDIDeviceBase::write_packed(uint32_t data)
 }
 
 void MIDIDeviceBase::add_sysex_packed(uint32_t data){
-    if (!support_sysex_multi_message) { // Just send the message...
-        write_packed(data);
-        return;
-    }
     msg_sysex_packed[msg_sysex_len_packed++] = data;
-    if (msg_sysex_len_packed >= tx_size) write_sysex_message();
+    if (msg_sysex_len_packed >= (tx_size / 4) - 1) write_sysex_message();
     if (msg_sysex_len_packed >= (SYSEX_MAX_LEN / 3)) write_sysex_message();
 }
 
 void MIDIDeviceBase::write_sysex_message() {
     if (!txpipe) return;
-    if (!support_sysex_multi_message) return;
     uint32_t tx_max = tx_size / 4;
     while (1) {
         uint32_t tx1 = tx1_count;
@@ -614,7 +604,7 @@ bool MIDIDeviceBase::read(uint8_t channel)
 		goto return_message;
 	}
 	if (type1 == 0x04) {
-		sysex_byte(n >> 8);
+        sysex_byte(n >> 8);
 		sysex_byte(n >> 16);
 		sysex_byte(n >> 24);
 		return false;
