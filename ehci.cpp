@@ -205,7 +205,12 @@ void USBHost::begin()
 	USBPHY2_CTRL_CLR = USBPHY_CTRL_SFTRST | USBPHY_CTRL_CLKGATE;
 	USBPHY2_CTRL_SET = USBPHY_CTRL_ENUTMILEVEL2 | USBPHY_CTRL_ENUTMILEVEL3;
 	USBPHY2_PWD = 0;
-
+	#ifdef ARDUINO_TEENSY41
+	IOMUXC_SW_MUX_CTL_PAD_GPIO_EMC_40 = 5;
+	IOMUXC_SW_PAD_CTL_PAD_GPIO_EMC_40 = 0x0008; // slow speed, weak 150 ohm drive
+	GPIO8_GDIR |= 1<<26;
+	GPIO8_DR_SET = 1<<26;
+	#endif
 #endif
 	delay(10);
 
@@ -266,12 +271,34 @@ void USBHost::begin()
 	println("USBHS_PERIODICLISTBASE = ", USBHS_PERIODICLISTBASE, HEX);
 	println("periodictable = ", (uint32_t)periodictable, HEX);
 
-	// enable interrupts, after this point interruts to all the work
+	// enable interrupts, after this point interrupts to all the work
 	attachInterruptVector(IRQ_USBHS, isr);
 	NVIC_ENABLE_IRQ(IRQ_USBHS);
+    
 	USBHS_USBINTR = USBHS_USBINTR_PCE | USBHS_USBINTR_TIE0 | USBHS_USBINTR_TIE1;
 	USBHS_USBINTR |= USBHS_USBINTR_UEE | USBHS_USBINTR_SEE;
 	USBHS_USBINTR |= USBHS_USBINTR_UPIE | USBHS_USBINTR_UAIE;
+    //USBHS_USBINTR |= USBHS_USBSTS_UI;
+    //USBHS_USBINTR |= USBHS_USBSTS_SRI;
+    //USBHS_USBINTR |= USBHS_USBSTS_RCL | USBHS_USBSTS_PS | USBHS_USBSTS_AS;
+    //USBHS_USBINTR |= 0xFFFF;
+    
+    
+    
+//x#define USBHS_USBINTR_UE    0x00000001                                 // USB interrupt enable
+// #define USBHS_USBINTR_UEE   0x00000002                                 // USB error interrupt enable
+// #define USBHS_USBINTR_PCE   0x00000004                                 // port change detect interrupt enable
+//x#define USBHS_USBINTR_FRE   0x00000008                                 // frame list rollover interrupt enable
+// #define USBHS_USBINTR_SEE   0x00000010                                 // system error interrupt enable
+//x#define USBHS_USBINTR_AAE   0x00000020                                 // async advance interrupt enable
+//x#define USBHS_USBINTR_URE   0x00000040                                 // USB reset interrupt enable
+//x#define USBHS_USBINTR_SRE   0x00000080                                 // SOF-received interrupt enable
+//x#define USBHS_USBINTR_SLE   0x00000100                                 // sleep (DC suspend) interrupt enable
+//#define USBHS_USBINTR_ULPIE 0x00000400                                 // ULPI interrupt enable
+//#define USBHS_USBINTR_NAKE  0x00010000                                 // nak interrupt enable
+// #define USBHS_USBINTR_UAIE  0x00040000                                 // USH host asychronous interrupt enable
+// #define USBHS_USBINTR_UPIE  0x00080000                                 // USB host periodic interrupt enable
+// #define USBHS_USBINTR_TIE0  0x01000000                                 // general purpose timer 0 interrupt
 
 }
 
@@ -303,19 +330,19 @@ void USBHost::isr()
 #if 0
 	println();
 	println("ISR: ", stat, HEX);
-	//if (stat & USBHS_USBSTS_UI)  println(" USB Interrupt");
+	if (stat & USBHS_USBSTS_UI)  println(" USB Interrupt");
 	if (stat & USBHS_USBSTS_UEI) println(" USB Error");
 	if (stat & USBHS_USBSTS_PCI) println(" Port Change");
-	//if (stat & USBHS_USBSTS_FRI) println(" Frame List Rollover");
+	if (stat & USBHS_USBSTS_FRI) println(" Frame List Rollover");
 	if (stat & USBHS_USBSTS_SEI) println(" System Error");
-	//if (stat & USBHS_USBSTS_AAI) println(" Async Advance (doorbell)");
+	if (stat & USBHS_USBSTS_AAI) println(" Async Advance (doorbell)");
 	if (stat & USBHS_USBSTS_URI) println(" Reset Recv");
-	//if (stat & USBHS_USBSTS_SRI) println(" SOF");
+	if (stat & USBHS_USBSTS_SRI) println(" SOF");
 	if (stat & USBHS_USBSTS_SLI) println(" Suspend");
 	if (stat & USBHS_USBSTS_HCH) println(" Host Halted");
-	//if (stat & USBHS_USBSTS_RCL) println(" Reclamation");
-	//if (stat & USBHS_USBSTS_PS)  println(" Periodic Sched En");
-	//if (stat & USBHS_USBSTS_AS)  println(" Async Sched En");
+	if (stat & USBHS_USBSTS_RCL) println(" Reclamation");
+	if (stat & USBHS_USBSTS_PS)  println(" Periodic Sched En");
+	if (stat & USBHS_USBSTS_AS)  println(" Async Sched En");
 	if (stat & USBHS_USBSTS_NAKI) println(" NAK");
 	if (stat & USBHS_USBSTS_UAI) println(" USB Async");
 	if (stat & USBHS_USBSTS_UPI) println(" USB Periodic");

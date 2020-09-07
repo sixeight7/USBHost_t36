@@ -60,7 +60,6 @@
 //#define USBHOST_PRINT_DEBUG
 //#define USBHDBGSerial	Serial1
 
-
 #ifndef USBHDBGSerial
 #define USBHDBGSerial	Serial
 #endif
@@ -740,6 +739,8 @@ public:
 	uint8_t  getOemKey() { return keyOEM; }
 	void     attachPress(void (*f)(int unicode)) { keyPressedFunction = f; }
 	void     attachRelease(void (*f)(int unicode)) { keyReleasedFunction = f; }
+	void     attachRawPress(void (*f)(uint8_t keycode)) { rawKeyPressedFunction = f; }
+	void     attachRawRelease(void (*f)(uint8_t keycode)) { rawKeyReleasedFunction = f; }
 	void     LEDS(uint8_t leds);
 	uint8_t  LEDS() {return leds_.byte;}
 	void     updateLEDS(void);
@@ -786,6 +787,8 @@ private:
 	void key_release(uint32_t mod, uint32_t key);
 	void (*keyPressedFunction)(int unicode);
 	void (*keyReleasedFunction)(int unicode);
+	void (*rawKeyPressedFunction)(uint8_t keycode) = nullptr;
+	void (*rawKeyReleasedFunction)(uint8_t keycode) = nullptr;
 	Pipe_t *datapipe;
 	setup_t setup;
 	uint8_t report[8];
@@ -1289,7 +1292,7 @@ protected:
 	void write_packed(uint32_t data);
     void add_sysex_packed(uint32_t data);
     void write_sysex_message();
-	void send_sysex_buffer_has_term(const uint8_t *data, uint32_t length, uint8_t cable);
+    void send_sysex_buffer_has_term(const uint8_t *data, uint32_t length, uint8_t cable);
 	void send_sysex_add_term_bytes(const uint8_t *data, uint32_t length, uint8_t cable);
 	void sysex_byte(uint8_t b);
 private:
@@ -1324,11 +1327,10 @@ private:
 	uint8_t msg_data1;
 	uint8_t msg_data2;
 	uint8_t msg_sysex[SYSEX_MAX_LEN];
-    uint16_t msg_sysex_len;
+	uint16_t msg_sysex_len;
     uint32_t msg_sysex_packed[SYSEX_MAX_LEN / 3];
     uint16_t msg_sysex_len_packed;
-    bool support_sysex_multi_message;
-    void (*handleNoteOff)(uint8_t ch, uint8_t note, uint8_t vel);
+	void (*handleNoteOff)(uint8_t ch, uint8_t note, uint8_t vel);
 	void (*handleNoteOn)(uint8_t ch, uint8_t note, uint8_t vel);
 	void (*handleVelocityChange)(uint8_t ch, uint8_t note, uint8_t vel);
 	void (*handleControlChange)(uint8_t ch, uint8_t control, uint8_t value);
@@ -1855,5 +1857,53 @@ private:
 	static product_vendor_mapping_t pid_vid_mapping[];
 
 };
+
+class ADK: public USBDriver {
+public:
+	ADK(USBHost &host) { init(); }
+	bool ready();
+	void begin(char *adk_manufacturer, char *adk_model, char *adk_desc, char *adk_version, char *adk_uri, char *adk_serial);
+	void end();
+	int available(void);
+	int peek(void);
+	int read(void);
+	size_t write(size_t len, uint8_t *buf);
+protected:
+	virtual bool claim(Device_t *device, int type, const uint8_t *descriptors, uint32_t len);
+	virtual void disconnect();
+	virtual void control(const Transfer_t *transfer);
+	static void rx_callback(const Transfer_t *transfer);
+	static void tx_callback(const Transfer_t *transfer);
+	void rx_data(const Transfer_t *transfer);
+	void tx_data(const Transfer_t *transfer);
+	void init();
+	void rx_queue_packets(uint32_t head, uint32_t tail);
+	void sendStr(Device_t *dev, uint8_t index, char *str);
+private:
+	int state = 0;
+	Pipe_t *rxpipe;
+	Pipe_t *txpipe;
+	enum { MAX_PACKET_SIZE = 512 };
+	enum { RX_QUEUE_SIZE = 1024 }; // must be more than MAX_PACKET_SIZE
+	uint8_t rx_buffer[MAX_PACKET_SIZE];
+	uint8_t tx_buffer[MAX_PACKET_SIZE];
+	uint16_t rx_size;
+	uint16_t tx_size;
+	uint8_t rx_queue[RX_QUEUE_SIZE];
+	bool rx_packet_queued;
+	uint16_t rx_head;
+	uint16_t rx_tail;
+	uint8_t rx_ep;
+	uint8_t tx_ep;
+	char *manufacturer;
+	char *model;
+	char *desc;
+	char *version;
+	char *uri;
+	char *serial;
+	Pipe_t mypipes[3] __attribute__ ((aligned(32)));
+	Transfer_t mytransfers[7] __attribute__ ((aligned(32)));
+};
+
 
 #endif

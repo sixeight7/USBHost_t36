@@ -158,7 +158,6 @@ bool MIDIDeviceBase::claim(Device_t *dev, int type, const uint8_t *descriptors, 
 					rx_ep = p[2] & 0x0F;
 					rx_ep_type = p[3];
 					rx_size = p[4] | (p[5] << 8);
-                    //rx_size = 16; // Test MG-300!!!!
 					println("      rx_size = ", rx_size);
 				}
 				break;
@@ -272,10 +271,13 @@ void MIDIDeviceBase::tx_data(const Transfer_t *transfer)
 	println("MIDIDevice transmit complete");
 	print("  MIDI Data: ");
 	print_hexbytes(transfer->buffer, tx_size);
+    uint32_t tx_max = tx_size / 4;
 	if (transfer->buffer == tx_buffer1) {
 		tx1_count = 0;
+        for (uint16_t i = 0; i < tx_max; i++) tx_buffer1[i] = 0; // Clear the buffer
 	} else if (transfer->buffer == tx_buffer2) {
 		tx2_count = 0;
+        for (uint16_t i = 0; i < tx_max; i++) tx_buffer2[i] = 0; // Clear the buffer
 	}
 }
 
@@ -301,6 +303,7 @@ void MIDIDeviceBase::write_packed(uint32_t data)
 			// use tx_buffer1
 			tx_buffer1[tx1++] = data;
 			tx1_count = tx1;
+                        __disable_irq();
 			if (tx1 >= tx_max) {
 				queue_Data_Transfer(txpipe, tx_buffer1, tx_max*4, this);
 			} else {
@@ -309,12 +312,14 @@ void MIDIDeviceBase::write_packed(uint32_t data)
 				tx1_count = tx_max;
 				queue_Data_Transfer(txpipe, tx_buffer1, tx_max*4, this);
 			}
+                        __enable_irq();
 			return;
 		}
 		if (tx2 < tx_max) {
 			// use tx_buffer2
 			tx_buffer2[tx2++] = data;
 			tx2_count = tx2;
+                        __disable_irq();
 			if (tx2 >= tx_max) {
 				queue_Data_Transfer(txpipe, tx_buffer2, tx_max*4, this);
 			} else {
@@ -323,6 +328,7 @@ void MIDIDeviceBase::write_packed(uint32_t data)
 				tx2_count = tx_max;
 				queue_Data_Transfer(txpipe, tx_buffer2, tx_max*4, this);
 			}
+                        __enable_irq();
 			return;
 		}
 	}
@@ -337,11 +343,16 @@ void MIDIDeviceBase::add_sysex_packed(uint32_t data){
 void MIDIDeviceBase::write_sysex_message() {
     if (!txpipe) return;
     uint32_t tx_max = tx_size / 4;
+    uint32_t timer_length = 100;
+    uint32_t timer = millis() + timer_length;
     while (1) {
         uint32_t tx1 = tx1_count;
         uint32_t tx2 = tx2_count;
+        //print("TX1:", tx1);
+        //println(" TX2:", tx2);
         if (tx1 + msg_sysex_len_packed <= tx_max && (tx2 == 0 || tx2 >= tx_max)) {
             // use tx_buffer1
+            __disable_irq();
             for (uint16_t i = 0; i < msg_sysex_len_packed; i++) {
                 tx_buffer1[tx1++] = msg_sysex_packed[i];
                 if (tx1 >= tx_max) {
@@ -358,10 +369,12 @@ void MIDIDeviceBase::write_sysex_message() {
                 queue_Data_Transfer(txpipe, tx_buffer1, tx_max*4, this);
             }
             msg_sysex_len_packed = 0;
+            __enable_irq();
             return;
         }
         if (tx2 + msg_sysex_len_packed <= tx_max) {
             // use tx_buffer2
+            __disable_irq();
             for (uint16_t i = 0; i < msg_sysex_len_packed; i++) {
                 tx_buffer2[tx2++] = msg_sysex_packed[i];
                 if (tx2 >= tx_max) {
@@ -378,10 +391,16 @@ void MIDIDeviceBase::write_sysex_message() {
                 queue_Data_Transfer(txpipe, tx_buffer2, tx_max*4, this);
             }
             msg_sysex_len_packed = 0;
+            __enable_irq();
             return;
+        }
+        if (millis() > timer) { // It hangs
+            tx1_count = 0;
+            tx2_count = 0;
         }
     }
 }
+
 
 void MIDIDeviceBase::send_sysex_buffer_has_term(const uint8_t *data, uint32_t length, uint8_t cable)
 {
@@ -604,7 +623,7 @@ bool MIDIDeviceBase::read(uint8_t channel)
 		goto return_message;
 	}
 	if (type1 == 0x04) {
-        sysex_byte(n >> 8);
+		sysex_byte(n >> 8);
 		sysex_byte(n >> 16);
 		sysex_byte(n >> 24);
 		return false;
